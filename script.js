@@ -126,11 +126,12 @@ function suggestionDetails(place) {
   return details.slice(0, 3).join(', ');
 }
 
-async function fetchGeocode(query, limit = 6) {
+async function fetchGeocode(query, limit = 12) {
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'jsonv2');
   url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('dedupe', '1');
   url.searchParams.set('limit', String(limit));
 
   const response = await fetch(url.toString(), { headers: geocodeHeaders });
@@ -138,12 +139,25 @@ async function fetchGeocode(query, limit = 6) {
   return response.json();
 }
 
+function normalizeQuery(query) {
+  const cleaned = query
+    .trim()
+    .replace(/\bbarangay\b/gi, '')
+    .replace(/\bbrgy\b/gi, '')
+    .replace(/\bmetro\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return cleaned;
+}
+
 async function fetchSuggestions() {
   const q = input.value.trim();
   if (q.length < 3) { hideSugg(); return; }
   try {
-    const data = await fetchGeocode(q, 6);
+    const data = await fetchGeocode(q, 10);
     if (!Array.isArray(data) || !data.length) { hideSugg(); return; }
+
+    data.sort((a, b) => (b.importance || 0) - (a.importance || 0));
 
     suggestionsEl.innerHTML = data.map(place => {
       const label = formatGeocodeLabel(place) || place.display_name || 'Unknown location';
@@ -181,10 +195,34 @@ async function doSearch() {
     return loadWeather(coords.lat, coords.lon, numericLabel);
   }
 
+  const normalized = normalizeQuery(q);
+  const candidates = [q, `${normalized}, Philippines`, `${normalized}, PH`].filter(Boolean);
+
   try {
-    const data = await fetchGeocode(q, 6);
-    if (!Array.isArray(data) || !data.length) { showError('Location not found. Please try a sharper name.'); return; }
-    const best = data.sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+    let data = [];
+    for (const candidate of candidates) {
+      const result = await fetchGeocode(candidate, 12);
+      if (Array.isArray(result) && result.length) {
+        data = result;
+        break;
+      }
+    }
+
+    if (!Array.isArray(data) || !data.length) {
+      showError('Location not found. Please try a sharper name or use a nearby city.');
+      return;
+    }
+
+    data = data.filter(place => place.lat && place.lon);
+    data.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+
+    const lowerQ = normalized.toLowerCase();
+    const exact = data.find(place => {
+      const label = formatGeocodeLabel(place).toLowerCase();
+      const display = (place.display_name || '').toLowerCase();
+      return label === lowerQ || display === lowerQ || label.startsWith(lowerQ) || display.startsWith(lowerQ);
+    });
+    const best = exact || data[0];
     const name = formatGeocodeLabel(best) || best.display_name || q;
     input.value = name;
     loadWeather(best.lat, best.lon, name);
@@ -339,8 +377,4 @@ function showError(message) {
       <div class="status-text">${sanitize(message)}</div>
       <div class="status-sub">Try a barangay, city, municipality, or province name.</div>
     </div>`;
-}
-
-function showError(msg) {
-  document.getElementById('content').innerHTML = `<div class="error-msg">⚠️ ${msg}</div>`;
 }
