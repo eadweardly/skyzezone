@@ -70,6 +70,9 @@ setInterval(updateClock, 1000);
 // Search
 let debounceT;
 const input = document.getElementById('locInput');
+const suggestionsEl = document.getElementById('suggestions');
+const searchWrap = document.querySelector('.search-wrap');
+
 input.addEventListener('input', () => {
   clearTimeout(debounceT);
   debounceT = setTimeout(fetchSuggestions, 380);
@@ -79,70 +82,141 @@ document.getElementById('btnSearch').addEventListener('click', doSearch);
 document.getElementById('btnGps').addEventListener('click', useGPS);
 document.getElementById('btnGpsBig').addEventListener('click', useGPS);
 document.addEventListener('click', e => {
-  if (!document.querySelector('.search-wrap').contains(e.target)) hideSugg();
+  if (!searchWrap.contains(e.target)) hideSugg();
 });
+
+const geocodeHeaders = { 'Accept-Language': 'en' };
+
+function sanitize(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function parseCoordinates(query) {
+  const match = query.match(/^\s*([-+]?\d{1,3}(?:\.\d+)?)[,\s]+([-+]?\d{1,3}(?:\.\d+)?)\s*$/);
+  return match ? { lat: match[1], lon: match[2] } : null;
+}
+
+function formatGeocodeLabel(place) {
+  if (!place || !place.address) return place?.display_name || '';
+  const addr = place.address;
+  const locality = addr.road || addr.neighbourhood || addr.suburb || addr.village || addr.town || addr.city || addr.municipality || addr.county;
+  const region = addr.state || addr.state_district || addr.region;
+  const country = addr.country;
+  return [locality, region, country].filter(Boolean).join(', ');
+}
+
+function suggestionDetails(place) {
+  if (!place || !place.address) return '';
+  const addr = place.address;
+  const details = [
+    addr.neighbourhood,
+    addr.suburb,
+    addr.road,
+    addr.city,
+    addr.town,
+    addr.village,
+    addr.municipality,
+    addr.county,
+    addr.state
+  ].filter(Boolean);
+  return details.slice(0, 3).join(', ');
+}
+
+async function fetchGeocode(query, limit = 6) {
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('limit', String(limit));
+
+  const response = await fetch(url.toString(), { headers: geocodeHeaders });
+  if (!response.ok) throw new Error('Geocoding failed');
+  return response.json();
+}
 
 async function fetchSuggestions() {
   const q = input.value.trim();
   if (q.length < 3) { hideSugg(); return; }
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`, {
-      headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
-    });
-    const data = await r.json();
-    if (!data.length) { hideSugg(); return; }
-    const el = document.getElementById('suggestions');
-    el.innerHTML = data.map(p => {
-      const parts = p.display_name.split(',');
-      const main = parts[0].trim();
-      const rest = parts.slice(1, 3).join(',').trim();
-      return `<div class="suggestion-item" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${p.display_name.replace(/"/g, '&quot;')}">
-        <strong>${main}</strong>${rest ? ', ' + rest : ''}
-      </div>`;
+    const data = await fetchGeocode(q, 6);
+    if (!Array.isArray(data) || !data.length) { hideSugg(); return; }
+
+    suggestionsEl.innerHTML = data.map(place => {
+      const label = formatGeocodeLabel(place) || place.display_name || 'Unknown location';
+      const info = suggestionDetails(place);
+      return `
+        <div class="suggestion-item" data-lat="${sanitize(place.lat)}" data-lon="${sanitize(place.lon)}" data-name="${sanitize(label)}">
+          <div class="suggestion-main">${sanitize(label)}</div>
+          <div class="suggestion-secondary">${sanitize(info)}</div>
+        </div>`;
     }).join('');
-    el.style.display = 'block';
-    el.querySelectorAll('.suggestion-item').forEach(item => {
+
+    suggestionsEl.style.display = 'block';
+    suggestionsEl.querySelectorAll('.suggestion-item').forEach(item => {
       item.addEventListener('click', () => {
-        input.value = item.querySelector('strong').textContent + (item.textContent.includes(',') ? item.textContent.substring(item.textContent.indexOf(',')) : '');
+        input.value = item.dataset.name;
         hideSugg();
         loadWeather(item.dataset.lat, item.dataset.lon, item.dataset.name);
       });
     });
-  } catch (e) { hideSugg(); }
+  } catch (e) {
+    hideSugg();
+  }
 }
-
-function hideSugg() { document.getElementById('suggestions').style.display = 'none'; }
 
 async function doSearch() {
   const q = input.value.trim();
   if (!q) return;
   showLoading();
   hideSugg();
+
+  const coords = parseCoordinates(q);
+  if (coords) {
+    const numericLabel = `${Number(coords.lat).toFixed(4)}, ${Number(coords.lon).toFixed(4)}`;
+    input.value = numericLabel;
+    return loadWeather(coords.lat, coords.lon, numericLabel);
+  }
+
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, {
-      headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
-    });
-    const data = await r.json();
-    if (!data.length) { showError("Location not found. Try a more specific search."); return; }
-    loadWeather(data[0].lat, data[0].lon, data[0].display_name);
-  } catch (e) { showError("Network error. Please check your connection."); }
+    const data = await fetchGeocode(q, 6);
+    if (!Array.isArray(data) || !data.length) { showError('Location not found. Please try a sharper name.'); return; }
+    const best = data.sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+    const name = formatGeocodeLabel(best) || best.display_name || q;
+    input.value = name;
+    loadWeather(best.lat, best.lon, name);
+  } catch (e) {
+    showError('Unable to locate that place. Try a city or barangay name again.');
+  }
 }
 
+function hideSugg() { suggestionsEl.style.display = 'none'; }
+
 function useGPS() {
-  if (!navigator.geolocation) { showError("Geolocation not supported by your browser."); return; }
-  showLoading("📍 Getting your location…");
+  if (!navigator.geolocation) { showError('Geolocation is not supported by this browser.'); return; }
+  showLoading('📍 Getting your location…');
   navigator.geolocation.getCurrentPosition(async pos => {
     const { latitude: lat, longitude: lon } = pos.coords;
     try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
-        headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
-      });
-      const data = await r.json();
-      const name = data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-      input.value = name.split(',')[0];
+      const url = new URL('https://nominatim.openstreetmap.org/reverse');
+      url.searchParams.set('lat', lat);
+      url.searchParams.set('lon', lon);
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('addressdetails', '1');
+      const response = await fetch(url.toString(), { headers: geocodeHeaders });
+      const data = await response.json();
+      const name = formatGeocodeLabel(data) || data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      input.value = name;
       loadWeather(lat, lon, name);
-    } catch (e) { loadWeather(lat, lon, `${lat.toFixed(4)}, ${lon.toFixed(4)}`); }
-  }, () => { showError("Location access denied. Please search manually."); });
+    } catch (e) {
+      const fallbackName = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      input.value = fallbackName;
+      loadWeather(lat, lon, fallbackName);
+    }
+  }, () => { showError('Location access denied. Please search manually.'); });
 }
 
 async function loadWeather(lat, lon, name) {
@@ -255,6 +329,15 @@ function showLoading(msg) {
     <div class="loading-wrap">
       <div class="loading-dots"><span></span><span></span><span></span></div>
       <div class="loading-text">${msg || 'Loading weather data…'}</div>
+    </div>`;
+}
+
+function showError(message) {
+  document.getElementById('content').innerHTML = `
+    <div class="status">
+      <div class="status-icon">⚠️</div>
+      <div class="status-text">${sanitize(message)}</div>
+      <div class="status-sub">Try a barangay, city, municipality, or province name.</div>
     </div>`;
 }
 
