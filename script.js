@@ -1,0 +1,219 @@
+const WMO = {
+  0:"Clear sky",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",
+  45:"Foggy",48:"Icy fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
+  61:"Slight rain",63:"Moderate rain",65:"Heavy rain",
+  71:"Slight snow",73:"Moderate snow",75:"Heavy snow",77:"Snow grains",
+  80:"Slight showers",81:"Showers",82:"Violent showers",
+  85:"Slight snow showers",86:"Heavy snow showers",
+  95:"Thunderstorm",96:"Thunderstorm w/ hail",99:"Thunderstorm w/ heavy hail"
+};
+const ICON = {
+  0:"☀️",1:"🌤️",2:"⛅",3:"☁️",45:"🌫️",48:"🌫️",
+  51:"🌦️",53:"🌦️",55:"🌧️",61:"🌧️",63:"🌧️",65:"🌧️",
+  71:"🌨️",73:"🌨️",75:"❄️",77:"❄️",80:"🌦️",81:"🌧️",82:"⛈️",
+  85:"🌨️",86:"❄️",95:"⛈️",96:"⛈️",99:"⛈️"
+};
+const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function updateClock() {
+  const now = new Date();
+  const el = document.getElementById('headerTime');
+  if (el) el.innerHTML = `${DAYS_SHORT[now.getDay()]}, ${MONTHS[now.getMonth()]} ${now.getDate()}<br>${now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}`;
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+let debounceT;
+const input = document.getElementById('locInput');
+input.addEventListener('input', () => {
+  clearTimeout(debounceT);
+  debounceT = setTimeout(fetchSuggestions, 380);
+});
+input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+document.getElementById('btnSearch').addEventListener('click', doSearch);
+document.getElementById('btnGps').addEventListener('click', useGPS);
+document.getElementById('btnGpsBig').addEventListener('click', useGPS);
+document.addEventListener('click', e => {
+  if (!document.querySelector('.search-wrap').contains(e.target)) hideSugg();
+});
+
+async function fetchSuggestions() {
+  const q = input.value.trim();
+  if (q.length < 3) { hideSugg(); return; }
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
+    });
+    const data = await r.json();
+    if (!data.length) { hideSugg(); return; }
+    const el = document.getElementById('suggestions');
+    el.innerHTML = data.map(p => {
+      const parts = p.display_name.split(',');
+      const main = parts[0].trim();
+      const rest = parts.slice(1, 3).join(',').trim();
+      return `<div class="suggestion-item" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${p.display_name.replace(/"/g, '&quot;')}">
+        <strong>${main}</strong>${rest ? ', ' + rest : ''}
+      </div>`;
+    }).join('');
+    el.style.display = 'block';
+    el.querySelectorAll('.suggestion-item').forEach(item => {
+      item.addEventListener('click', () => {
+        input.value = item.querySelector('strong').textContent + (item.textContent.includes(',') ? item.textContent.substring(item.textContent.indexOf(',')) : '');
+        hideSugg();
+        loadWeather(item.dataset.lat, item.dataset.lon, item.dataset.name);
+      });
+    });
+  } catch (e) { hideSugg(); }
+}
+
+function hideSugg() { document.getElementById('suggestions').style.display = 'none'; }
+
+async function doSearch() {
+  const q = input.value.trim();
+  if (!q) return;
+  showLoading();
+  hideSugg();
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
+    });
+    const data = await r.json();
+    if (!data.length) { showError("Location not found. Try a more specific search."); return; }
+    loadWeather(data[0].lat, data[0].lon, data[0].display_name);
+  } catch (e) { showError("Network error. Please check your connection."); }
+}
+
+function useGPS() {
+  if (!navigator.geolocation) { showError("Geolocation not supported by your browser."); return; }
+  showLoading("📍 Getting your location…");
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const { latitude: lat, longitude: lon } = pos.coords;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+        headers: { 'Accept-Language': 'en', 'User-Agent': 'SkyzeZoneApp' }
+      });
+      const data = await r.json();
+      const name = data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      input.value = name.split(',')[0];
+      loadWeather(lat, lon, name);
+    } catch (e) { loadWeather(lat, lon, `${lat.toFixed(4)}, ${lon.toFixed(4)}`); }
+  }, () => { showError("Location access denied. Please search manually."); });
+}
+
+async function loadWeather(lat, lon, name) {
+  showLoading();
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code,uv_index` +
+      `&hourly=temperature_2m,precipitation_probability,weather_code` +
+      `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset` +
+      `&timezone=auto&forecast_days=7`;
+    const r = await fetch(url);
+    const d = await r.json();
+    renderWeather(d, name);
+  } catch (e) { showError("Failed to load weather data. Please try again."); }
+}
+
+function renderWeather(d, name) {
+  const c = d.current;
+  const daily = d.daily;
+  const hourly = d.hourly;
+  const now = new Date();
+
+  const nameParts = name.split(',');
+  const locMain = nameParts[0].trim();
+  const locSub = nameParts.slice(1, 3).map(s => s.trim()).filter(Boolean).join(', ');
+  const windDir = ['N','NE','E','SE','S','SW','W','NW'][Math.round(c.wind_direction_10m / 45) % 8];
+
+  const todayStr = now.toISOString().split('T')[0];
+  const todayIdx = hourly.time.findIndex(t => t.startsWith(todayStr));
+  const nowHour = now.getHours();
+  const startIdx = todayIdx >= 0 ? todayIdx + nowHour : 0;
+  const hoursToShow = hourly.time.slice(startIdx, startIdx + 12);
+
+  const hourlyHTML = hoursToShow.map((t, i) => {
+    const idx = startIdx + i;
+    const hr = new Date(t);
+    const label = i === 0 ? 'Now' : hr.getHours() === 0 ? '12 AM' : hr.getHours() > 12 ? `${hr.getHours() - 12} PM` : `${hr.getHours()} AM`;
+    const code = hourly.weather_code[idx] ?? 0;
+    const pop = hourly.precipitation_probability[idx] ?? 0;
+    return `<div class="hourly-card ${i === 0 ? 'active' : ''}">
+      <div class="hourly-time">${label}</div>
+      <div class="hourly-emoji">${ICON[code] || '🌡️'}</div>
+      <div class="hourly-temp">${Math.round(hourly.temperature_2m[idx] ?? 0)}°</div>
+      <div class="hourly-pop">${pop}%</div>
+    </div>`;
+  }).join('');
+
+  const dailyHTML = daily.time.map((t, i) => {
+    const date = new Date(t + 'T00:00:00');
+    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAYS_SHORT[date.getDay()];
+    const code = daily.weather_code[i] ?? 0;
+    const pop = daily.precipitation_probability_max[i] ?? 0;
+    const max = Math.round(daily.temperature_2m_max[i] ?? 0);
+    const min = Math.round(daily.temperature_2m_min[i] ?? 0);
+    return `<div class="daily-row">
+      <div class="daily-day">${label}</div>
+      <div class="daily-emoji">${ICON[code] || '🌡️'}</div>
+      <div class="daily-desc">${WMO[code] || '—'}</div>
+      <div class="daily-pop-wrap">
+        <div class="daily-pop-bar"><div class="daily-pop-fill" style="width:${pop}%"></div></div>
+        <div class="daily-pop-pct">${pop}%</div>
+      </div>
+      <div class="daily-temps">
+        <span class="daily-max">${max}°</span>
+        <span class="daily-min">${min}°</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const sunrise = daily.sunrise?.[0] ? new Date(daily.sunrise[0]).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }) : '—';
+  const sunset = daily.sunset?.[0] ? new Date(daily.sunset[0]).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+  document.getElementById('content').innerHTML = `
+    <div class="glass-card current">
+      <div class="current-top">
+        <div>
+          <div class="location-name">${locMain}</div>
+          <div class="location-sub">${locSub || 'Local weather'}</div>
+        </div>
+        <div style="text-align:right;font-size:0.78rem;color:var(--text-dim)">
+          ${now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' })}
+        </div>
+      </div>
+      <div class="current-main">
+        <div class="temp-display">${Math.round(c.temperature_2m)}<span class="temp-unit">°C</span></div>
+        <div class="current-info">
+          <div class="weather-emoji">${ICON[c.weather_code] || '🌡️'}</div>
+          <div class="weather-desc">${WMO[c.weather_code] || '—'}</div>
+          <div class="feels-like">Feels like ${Math.round(c.apparent_temperature)}°C</div>
+        </div>
+      </div>
+      <div class="metrics-row">
+        <div class="metric-pill"><div class="metric-label">Humidity</div><div class="metric-val">${c.relative_humidity_2m}%</div></div>
+        <div class="metric-pill"><div class="metric-label">Wind</div><div class="metric-val">${Math.round(c.wind_speed_10m)} <span style="font-size:0.7rem;color:var(--text-muted)">km/h ${windDir}</span></div></div>
+        <div class="metric-pill"><div class="metric-label">UV Index</div><div class="metric-val">${Math.round(c.uv_index ?? 0)}</div></div>
+        <div class="metric-pill"><div class="metric-label">Sunrise</div><div class="metric-val" style="font-size:0.9rem">${sunrise}</div></div>
+        <div class="metric-pill"><div class="metric-label">Sunset</div><div class="metric-val" style="font-size:0.9rem">${sunset}</div></div>
+        <div class="metric-pill"><div class="metric-label">Timezone</div><div class="metric-val" style="font-size:0.72rem;color:var(--text-muted)">${d.timezone || '—'}</div></div>
+      </div>
+    </div>
+    <div class="section-label">Hourly forecast — next 12 hours</div>
+    <div class="hourly-scroll">${hourlyHTML}</div>
+    <div class="section-label">7-day forecast</div>
+    <div class="daily-list">${dailyHTML}</div>
+  `;
+}
+
+function showLoading(msg) {
+  document.getElementById('content').innerHTML = `
+    <div class="status">
+      <div class="status-icon">⏳</div>
+      <div class="status-text">${msg || 'Loading weather data…'}</div>
+    </div>`;
+}
+
+function showError(msg) {
+  document.getElementById('content').innerHTML = `<div class="error-msg">⚠️ ${msg}</div>`;
+}
