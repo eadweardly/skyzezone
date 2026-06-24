@@ -16,6 +16,49 @@ const ICON = {
 const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// Stars
+function generateStars() {
+  const container = document.getElementById('stars');
+  if (!container) return;
+  const count = 80;
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const size = Math.random() * 2.5 + 0.5;
+    const x = Math.random() * 100;
+    const y = Math.random() * 100;
+    const dur = (Math.random() * 4 + 2).toFixed(1);
+    const delay = (Math.random() * 5).toFixed(1);
+    html += `<div class="star" style="width:${size}px;height:${size}px;left:${x}%;top:${y}%;--dur:${dur}s;--delay:-${delay}s;"></div>`;
+  }
+  container.innerHTML = html;
+}
+generateStars();
+
+// Theme
+const html = document.documentElement;
+const saved = localStorage.getItem('skyze-theme') || 'dark';
+setTheme(saved);
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const current = html.getAttribute('data-theme');
+  setTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+function setTheme(theme) {
+  html.setAttribute('data-theme', theme);
+  localStorage.setItem('skyze-theme', theme);
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (theme === 'dark') {
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+    label.textContent = 'Light';
+  } else {
+    icon.innerHTML = '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+    label.textContent = 'Dark';
+  }
+}
+
+// Clock
 function updateClock() {
   const now = new Date();
   const el = document.getElementById('headerTime');
@@ -24,6 +67,7 @@ function updateClock() {
 updateClock();
 setInterval(updateClock, 1000);
 
+// Search
 let debounceT;
 const input = document.getElementById('locInput');
 input.addEventListener('input', () => {
@@ -208,9 +252,9 @@ function renderWeather(d, name) {
 
 function showLoading(msg) {
   document.getElementById('content').innerHTML = `
-    <div class="status">
-      <div class="status-icon">⏳</div>
-      <div class="status-text">${msg || 'Loading weather data…'}</div>
+    <div class="loading-wrap">
+      <div class="loading-dots"><span></span><span></span><span></span></div>
+      <div class="loading-text">${msg || 'Loading weather data…'}</div>
     </div>`;
 }
 
