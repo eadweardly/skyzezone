@@ -173,16 +173,6 @@ body::before {
   width: 38px; height: 38px; border-radius: 50%; transition: background 0.2s, transform 0.2s;
 }
 .btn-gps:hover { background: var(--glass-hover); transform: scale(1.1); }
-.btn-search {
-  background: linear-gradient(135deg, var(--accent2), var(--accent));
-  border: none; border-radius: 50px; padding: 0 18px; height: 38px;
-  font-size: 0.85rem; font-weight: 500; color: #fff; gap: 6px;
-  display: flex; align-items: center; cursor: pointer;
-  transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 4px 15px rgba(125,211,252,0.2);
-}
-.btn-search:hover { opacity: 0.88; transform: scale(1.03); box-shadow: 0 6px 20px rgba(125,211,252,0.3); }
-.btn-search:active { transform: scale(0.97); }
 
 .suggestions {
   position: absolute; top: calc(100% + 12px); left: 0; right: 0;
@@ -548,5 +538,6 @@ body::before {
   .weather-emoji,
   .status-icon {
     -webkit-transform: translateZ(0);
+    transform: translateZ(0);
   }
 }
