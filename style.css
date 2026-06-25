@@ -411,3 +411,142 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+/* ===== MOBILE FIXES ===== */
+
+/* Fix emoji animation glitch on mobile — use will-change and contain */
+.weather-emoji {
+  will-change: transform;
+  contain: layout style;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Fix star/orb performance on mobile */
+@media (max-width: 768px) {
+  /* Disable heavy backdrop-filter on low-end devices */
+  .glass-card,
+  .metric-pill,
+  .hourly-card,
+  .daily-row,
+  .search-box,
+  .suggestions,
+  .theme-toggle {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: rgba(15, 30, 55, 0.75);
+  }
+
+  [data-theme="light"] .glass-card,
+  [data-theme="light"] .metric-pill,
+  [data-theme="light"] .hourly-card,
+  [data-theme="light"] .daily-row {
+    background: rgba(255, 255, 255, 0.82);
+  }
+
+  [data-theme="light"] .search-box,
+  [data-theme="light"] .theme-toggle {
+    background: rgba(255, 255, 255, 0.75);
+  }
+
+  /* Reduce orbs — too heavy on mobile GPU */
+  .orb { filter: blur(40px); opacity: 0.08; }
+  .orb3 { display: none; }
+
+  /* Fix emoji animation — simpler keyframe on mobile */
+  .weather-emoji {
+    animation: emojiFloatMobile 4s ease-in-out infinite;
+  }
+
+  .status-icon {
+    animation: emojiFloatMobile 4s ease-in-out infinite;
+  }
+
+  /* Fix staggered animation flicker on mobile */
+  .metric-pill,
+  .daily-row,
+  .hourly-card {
+    animation: fadeInSimple 0.35s ease both;
+  }
+
+  /* Prevent layout shift on temp display */
+  .temp-display {
+    font-size: 4rem;
+    letter-spacing: -2px;
+  }
+
+  /* Fix search box overflow */
+  .search-box {
+    padding: 8px 10px 8px 16px;
+    min-height: 50px;
+  }
+
+  .search-box input {
+    font-size: 0.9rem;
+  }
+
+  /* Fix header wrap on small screens */
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 1.25rem;
+  }
+
+  .header-right {
+    gap: 8px;
+  }
+
+  /* Hourly cards — slightly wider touch targets */
+  .hourly-card {
+    flex: 0 0 66px;
+    padding: 10px 6px;
+  }
+
+  /* Daily row — better mobile layout */
+  .daily-row {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  /* Disable hover transforms on touch — they get stuck */
+  .glass-card:hover,
+  .hourly-card:hover,
+  .daily-row:hover,
+  .metric-pill:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .temp-display { font-size: 3.2rem; letter-spacing: -1px; }
+  .location-name { font-size: 1.1rem; }
+  .btn-search { padding: 0 12px; font-size: 0.8rem; }
+  .theme-toggle { padding: 5px 10px; font-size: 0.76rem; }
+  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Mobile-safe animation keyframes */
+@keyframes emojiFloatMobile {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes fadeInSimple {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Fix iOS Safari rendering issues */
+@supports (-webkit-touch-callout: none) {
+  .glass-card,
+  .metric-pill,
+  .hourly-card,
+  .daily-row {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+
+  .weather-emoji,
+  .status-icon {
+    -webkit-transform: translateZ(0);
+  }
+}
